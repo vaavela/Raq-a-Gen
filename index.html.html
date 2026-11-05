@@ -1,0 +1,1596 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAKI'A | Cosmología del Génesis</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#050711;color:#f3e8cf;font-family:Georgia,serif}
+canvas{display:block}
+#ui{position:fixed;right:15px;top:15px;width:280px;max-height:94vh;overflow:auto;padding:17px;background:rgba(8,13,25,.9);border:1px solid #a98a4b;border-radius:12px;backdrop-filter:blur(12px);z-index:10}
+h1{font-size:28px;letter-spacing:5px;margin:0;color:#e6c782}
+h2{font-size:11px;letter-spacing:2px;color:#c5a96a;margin-top:20px}
+p{font-size:11px;color:#b8c4d5;line-height:1.5}
+button{width:100%;margin:4px 0;padding:9px;background:#171e30;color:#e8d6a9;border:1px solid #6b5735;border-radius:5px;cursor:pointer;font-size:11px}
+button:hover{background:#453921}
+button.active{background:#66512e}
+label{font-size:11px;display:flex;justify-content:space-between;margin:10px 0}
+#info{position:fixed;left:20px;bottom:20px;width:350px;background:rgba(7,12,24,.8);padding:15px;border-left:2px solid #d5b56e;z-index:5}
+#info strong{color:#e8c982;font-size:18px}
+#info p{margin-bottom:0}
+@media(max-width:650px){
+#ui{width:220px;max-height:55vh;right:8px;top:8px}
+#info{width:calc(100% - 245px);left:8px;bottom:8px}
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+<h1>RAKI'A</h1>
+<p>Una exploración tridimensional de los estratos cósmicos del Génesis.</p>
+
+<h2>GEOMETRÍA CÓSMICA</h2>
+<button id="cut">Activar corte transversal</button>
+<button id="global">Vista global de la Raki'a</button>
+
+<h2>ENFOQUE POR ESTRATO</h2>
+<button data-view="eden">Gan Edén · Jardín superior</button>
+<button data-view="adamah">Adamá · Tierra fértil</button>
+<button data-view="eretz">Érets · Superficie terrestre</button>
+<button data-view="sheol">Sheol · Abismo inferior</button>
+
+<h2>SECUENCIAS NARRATIVAS</h2>
+<button data-story="germ">I · Germinación y elevación</button>
+<button data-story="fall">II · La desobediencia</button>
+<button data-story="murder">III · Fratricidio y expulsión</button>
+<button data-story="settle">IV · Población de la Érets</button>
+<button id="pause">Pausar / reanudar</button>
+
+<h2>VISUALIZACIÓN</h2>
+<label>Mostrar cascadas <input id="water" type="checkbox" checked></label>
+<label>Mostrar etiquetas <input id="labels" type="checkbox" checked></label>
+<label>Mostrar atmósfera <input id="atmo" type="checkbox" checked></label>
+<p>Arrastra para orbitar. Usa la rueda para acercar. Haz clic sobre personajes para inspeccionarlos.</p>
+</div>
+
+<div id="info">
+<strong id="infoTitle">La Raki'a</strong>
+<p id="infoText">Una reconstrucción visual interpretativa del cosmos estratificado. Explora los estratos y sus relaciones espaciales.</p>
+</div>
+
+<script type="importmap">
+{
+"imports":{
+"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import {OrbitControls} from "three/addons/controls/OrbitControls.js";
+import {gsap} from "https://cdn.jsdelivr.net/npm/gsap@3.12.5/+esm";
+
+"use strict";
+
+// ============================================================
+// ESCENA
+// ============================================================
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x050711);
+scene.fog=new THREE.FogExp2(0x080c19,.003);
+
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.1,500);
+camera.position.set(40,30,55);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.3;
+document.body.appendChild(renderer.domElement);
+
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;
+controls.dampingFactor=.06;
+controls.minDistance=8;
+controls.maxDistance=150;
+controls.target.set(0,-4,0);
+
+scene.add(new THREE.HemisphereLight(0x9eb9db,0x251526,1.5));
+
+const sun=new THREE.DirectionalLight(0xffdfaa,3.5);
+sun.position.set(-25,40,25);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+scene.add(sun);
+
+const edenLight=new THREE.PointLight(0xffd37b,200,35);
+edenLight.position.set(0,19,0);
+scene.add(edenLight);
+
+const sheolLight=new THREE.PointLight(0x7445c7,120,45);
+sheolLight.position.set(0,-22,0);
+scene.add(sheolLight);
+
+const world=new THREE.Group();
+scene.add(world);
+
+const layers={};
+const characters={};
+const pickables=[];
+const animated=[];
+const waterGroup=new THREE.Group();
+const labelGroup=new THREE.Group();
+world.add(waterGroup,labelGroup);
+
+const M=(color,roughness=.8,metalness=.05,extra={})=>
+new THREE.MeshStandardMaterial({color,roughness,metalness,...extra});
+
+function add(mesh,parent=world){
+mesh.castShadow=true;
+mesh.receiveShadow=true;
+parent.add(mesh);
+return mesh;
+}
+
+function cylinderBetween(a,b,r1,r2,material,parent=world){
+const direction=new THREE.Vector3().subVectors(b,a);
+const mesh=new THREE.Mesh(
+new THREE.CylinderGeometry(r2,r1,direction.length(),12),
+material
+);
+mesh.position.copy(a).add(b).multiplyScalar(.5);
+mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction.normalize());
+return add(mesh,parent);
+}
+
+// ============================================================
+// GEOMETRÍA DE MONTAÑAS
+// Cada masa tiene cima habitable, laderas y base más ancha.
+// ============================================================
+
+function mountainMass(parent,radius,topY,bottomY,color,depthScale=1){
+
+const segments=180;
+const height=topY-bottomY;
+
+const rings=[
+{r:.82,y:topY},
+{r:.86,y:topY-height*.10},
+{r:.96,y:topY-height*.34},
+{r:1.08,y:topY-height*.70},
+{r:1.15,y:bottomY}
+];
+
+const vertices=[];
+const colors=[];
+const indices=[];
+const baseColor=new THREE.Color(color);
+
+for(let r=0;r<rings.length;r++){
+const ring=rings[r];
+
+for(let i=0;i<=segments;i++){
+const angle=i/segments*Math.PI*2;
+
+const variation=
+1+
+Math.sin(angle*4+r*.55)*.035+
+Math.sin(angle*9+r*.8)*.022+
+Math.cos(angle*15+r*.4)*.012;
+
+const radial=radius*ring.r*variation;
+const x=Math.cos(angle)*radial;
+const z=Math.sin(angle)*radial*depthScale;
+
+const verticalVariation=
+Math.sin(angle*5+r*1.3)*.16+
+Math.cos(angle*11+r*.7)*.09;
+
+vertices.push(x,ring.y+verticalVariation,z);
+
+const shade=
+.83+
+Math.sin(angle*7+r*2)*.08+
+Math.cos(angle*5-r)*.05;
+
+const c=baseColor.clone().multiplyScalar(shade);
+colors.push(c.r,c.g,c.b);
+}
+}
+
+for(let r=0;r<rings.length-1;r++){
+for(let i=0;i<segments;i++){
+const a=r*(segments+1)+i;
+const b=a+segments+1;
+indices.push(a,b,a+1);
+indices.push(b,b+1,a+1);
+}
+}
+
+const geometry=new THREE.BufferGeometry();
+geometry.setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));
+geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
+geometry.setIndex(indices);
+geometry.computeVertexNormals();
+
+const material=new THREE.MeshStandardMaterial({
+vertexColors:true,
+roughness:.96,
+metalness:.01,
+side:THREE.DoubleSide
+});
+
+const mountain=new THREE.Mesh(geometry,material);
+add(mountain,parent);
+return mountain;
+}
+
+// Superficie superior irregular.
+
+function mountainSurface(parent,radius,y,color,depthScale=1){
+
+const geometry=new THREE.CircleGeometry(radius*.82,180);
+const position=geometry.attributes.position;
+
+for(let i=0;i<position.count;i++){
+const x=position.getX(i);
+const z=position.getY(i);
+const distance=Math.sqrt(x*x+z*z)/(radius*.82);
+const angle=Math.atan2(z,x);
+
+const variation=
+Math.sin(angle*5)*.12+
+Math.cos(angle*9)*.08+
+Math.sin(distance*18+angle*3)*.10;
+
+position.setZ(i,variation*(.3+distance*.7));
+}
+
+geometry.computeVertexNormals();
+
+const material=M(color,1,0);
+const surface=new THREE.Mesh(geometry,material);
+surface.rotation.x=-Math.PI/2;
+surface.scale.z=depthScale;
+surface.position.y=y;
+add(surface,parent);
+return surface;
+}
+
+// Rocas colocadas sobre las laderas.
+
+function mountainRocks(parent,radius,topY,bottomY,count,palette,depthScale=1){
+
+for(let i=0;i<count;i++){
+
+const angle=Math.random()*Math.PI*2;
+const t=.22+Math.random()*.72;
+const y=topY-(topY-bottomY)*t;
+const distance=radius*(.83+t*.30);
+
+const rock=new THREE.Mesh(
+new THREE.DodecahedronGeometry(.25+Math.random()*.65,1),
+M(palette[i%palette.length],.98)
+);
+
+rock.position.set(
+Math.cos(angle)*distance,
+y,
+Math.sin(angle)*distance*depthScale
+);
+
+rock.rotation.set(
+Math.random()*Math.PI,
+Math.random()*Math.PI,
+Math.random()*Math.PI
+);
+
+rock.scale.set(
+1+Math.random(),
+.6+Math.random()*1.5,
+1+Math.random()
+);
+
+add(rock,parent);
+}
+}
+
+// ============================================================
+// ALTURAS Y ESTRATOS
+// ============================================================
+
+const LEVELS={
+eden:19,
+adamah:6,
+eretz:-13,
+sheol:-29
+};
+
+// ============================================================
+// SHEOL
+// Se conserva como abismo debajo de Érets.
+// ============================================================
+
+layers.sheol=new THREE.Group();
+world.add(layers.sheol);
+
+const sheolFloor=new THREE.Mesh(
+new THREE.CylinderGeometry(19,19,2,128),
+M(0x20152d,1)
+);
+sheolFloor.position.y=-29.5;
+add(sheolFloor,layers.sheol);
+
+for(let i=0;i<65;i++){
+const angle=Math.random()*Math.PI*2;
+const radius=12+Math.random()*7;
+
+const rock=new THREE.Mesh(
+new THREE.DodecahedronGeometry(.7+Math.random()*1.7),
+M(i%2?0x352740:0x21192d)
+);
+
+rock.position.set(
+Math.cos(angle)*radius,
+-29+Math.random()*3,
+Math.sin(angle)*radius
+);
+rock.scale.y=1+Math.random()*3;
+add(rock,layers.sheol);
+}
+
+// ============================================================
+// ÉRETS
+// La montaña más extensa: tierra fértil, praderas y vegetación.
+// ============================================================
+
+layers.eretz=new THREE.Group();
+world.add(layers.eretz);
+
+const eretzTop=LEVELS.eretz+1;
+const eretzBottom=-22;
+
+// Masa terrestre con tonalidad de suelo fértil.
+mountainMass(
+layers.eretz,
+16,
+eretzTop,
+eretzBottom,
+0x526c42,
+.90
+);
+
+// Superficie superior verde.
+mountainSurface(
+layers.eretz,
+16,
+eretzTop,
+0x63864b,
+.90
+);
+
+// Pocas rocas visibles en las laderas.
+mountainRocks(
+layers.eretz,
+16,
+eretzTop,
+eretzBottom,
+24,
+[0x655943,0x78694b,0x554b3a],
+.90
+);
+
+// Piedras pequeñas y dispersas en la superficie.
+for(let i=0;i<45;i++){
+
+const a=Math.random()*Math.PI*2;
+const r=Math.sqrt(Math.random())*11.5;
+
+const stone=new THREE.Mesh(
+new THREE.DodecahedronGeometry(.12+Math.random()*.25,1),
+M([0x655943,0x78694b,0x554b3a][i%3],1)
+);
+
+stone.position.set(
+Math.cos(a)*r,
+eretzTop+.12,
+Math.sin(a)*r*.90
+);
+
+stone.scale.set(
+1+Math.random(),
+.5+Math.random(),
+1+Math.random()
+);
+
+add(stone,layers.eretz);
+}
+
+// ============================================================
+// ADAMÁ
+// Montaña intermedia, más alta y menor que Érets.
+// ============================================================
+
+layers.adamah=new THREE.Group();
+world.add(layers.adamah);
+
+const adamahTop=LEVELS.adamah+.9;
+const adamahBottom=1.5;
+
+mountainMass(
+layers.adamah,
+12,
+adamahTop,
+adamahBottom,
+0x875537,
+.94
+);
+
+mountainSurface(
+layers.adamah,
+12,
+adamahTop,
+0x986641,
+.94
+);
+
+mountainRocks(
+layers.adamah,
+12,
+adamahTop,
+adamahBottom,
+70,
+[0x875537,0x68452f,0xa47a4e],
+.94
+);
+
+// Surcos agrícolas sobre el terreno.
+
+for(let i=-6;i<=6;i++){
+const curve=new THREE.CatmullRomCurve3([
+new THREE.Vector3(i*1.5,adamahTop+.15,-8),
+new THREE.Vector3(i*1.4,adamahTop+.15,-4),
+new THREE.Vector3(i*1.5,adamahTop+.15,3),
+new THREE.Vector3(i*1.3,adamahTop+.15,8)
+]);
+
+add(new THREE.Mesh(
+new THREE.TubeGeometry(curve,50,.07,6,false),
+M(0x573a29)
+),layers.adamah);
+}
+
+// ============================================================
+// GAN EDÉN
+// Elevación superior y más pequeña.
+// ============================================================
+
+layers.eden=new THREE.Group();
+world.add(layers.eden);
+
+const edenTop=LEVELS.eden+1.52;
+const edenBottom=14.5;
+
+mountainMass(
+layers.eden,
+8,
+edenTop,
+edenBottom,
+0x63513c,
+.96
+);
+
+mountainSurface(
+layers.eden,
+8,
+edenTop,
+0x49804b,
+.96
+);
+
+mountainRocks(
+layers.eden,
+8,
+edenTop,
+edenBottom,
+38,
+[0x63513c,0x756344,0x4b4935],
+.96
+);
+
+// ============================================================
+// ÁRBOLES PROCEDIMENTALES
+// ============================================================
+
+function createTree(parent,x,y,z,scale=1,type=0){
+
+const tree=new THREE.Group();
+tree.position.set(x,y,z);
+tree.scale.setScalar(scale);
+parent.add(tree);
+
+const trunk=M(type?0x3b3026:0x765034,.95);
+let previous=new THREE.Vector3(0,0,0);
+
+for(let i=0;i<8;i++){
+const next=new THREE.Vector3(
+Math.sin(i*.65)*.2,
+(i+1)*.4,
+Math.cos(i*.5)*.15
+);
+
+cylinderBetween(previous,next,.2-i*.015,.16-i*.015,trunk,tree);
+previous=next;
+}
+
+for(let i=0;i<12;i++){
+const angle=i*2.4;
+
+const branchStart=new THREE.Vector3(
+Math.sin(angle)*.1,1+i*.12,Math.cos(angle)*.1
+);
+
+const branchEnd=new THREE.Vector3(
+Math.cos(angle)*(.7+(i%3)*.2),
+1.6+(i%4)*.2,
+Math.sin(angle)*(.7+(i%3)*.2)
+);
+
+cylinderBetween(branchStart,branchEnd,.1,.025,trunk,tree);
+
+const leaf=new THREE.Mesh(
+new THREE.IcosahedronGeometry(.45,1),
+M(type?0x173e32:0x3f934a,.55,.1,{
+emissive:type?0x102b20:0x526b1e,
+emissiveIntensity:.35
+})
+);
+
+leaf.position.copy(branchEnd);
+leaf.scale.set(1.4,.7,.9);
+add(leaf,tree);
+}
+
+if(type===1){
+for(let i=0;i<8;i++){
+const fruit=new THREE.Mesh(
+new THREE.SphereGeometry(.15,16,12),
+new THREE.MeshStandardMaterial({
+color:0xf0a53c,
+emissive:0xb94c10,
+emissiveIntensity:1
+})
+);
+
+const a=i*Math.PI*2/8;
+fruit.position.set(Math.cos(a),1.7,Math.sin(a));
+add(fruit,tree);
+}
+}
+
+return tree;
+}
+
+createTree(layers.eden,-2,edenTop+.15,0,1.35,0);
+createTree(layers.eden,2.3,edenTop+.15,.5,1.2,1);
+
+for(let i=0;i<18;i++){
+const a=i*Math.PI*2/18;
+const r=4.5+Math.random()*3.5;
+
+createTree(
+layers.adamah,
+Math.cos(a)*r,
+adamahTop+.15,
+Math.sin(a)*r,
+.35+Math.random()*.35,
+i%4===0?1:0
+);
+}
+
+// ============================================================
+// VEGETACIÓN DE LA ÉRETS
+// Árboles, arbustos y vegetación en la cima y las laderas.
+// ============================================================
+
+// Altura aproximada de las laderas según su radio.
+
+function eretzSlopeHeight(radius){
+
+const rings=[
+{r:16*.82,t:0},
+{r:16*.86,t:.10},
+{r:16*.96,t:.34},
+{r:16*1.08,t:.70},
+{r:16*1.15,t:1}
+];
+
+for(let i=0;i<rings.length-1;i++){
+
+const a=rings[i];
+const b=rings[i+1];
+
+if(radius>=a.r && radius<=b.r){
+
+const f=(radius-a.r)/(b.r-a.r);
+const t=THREE.MathUtils.lerp(a.t,b.t,f);
+
+return eretzTop-(eretzTop-eretzBottom)*t;
+}
+}
+
+return eretzBottom;
+}
+
+// Zonas ocupadas por personajes y titanes.
+
+const eretzOccupied=[
+[-8,-4],
+[8,-5],
+[-4,7],
+[5,7],
+[4,2]
+];
+
+function isEretzPositionFree(x,z){
+
+return eretzOccupied.every(([ox,oz])=>{
+return Math.hypot(x-ox,z-oz)>3.2;
+});
+}
+
+// Árboles de la cima.
+
+let placedTopTrees=0;
+let attemptsTop=0;
+
+while(placedTopTrees<16 && attemptsTop<150){
+
+attemptsTop++;
+
+const a=Math.random()*Math.PI*2;
+const r=6.5+Math.random()*5;
+
+const x=Math.cos(a)*r;
+const z=Math.sin(a)*r*.90;
+
+if(!isEretzPositionFree(x,z))continue;
+
+createTree(
+layers.eretz,
+x,
+eretzTop+.15,
+z,
+.65+Math.random()*.55,
+Math.random()<.18?1:0
+);
+
+placedTopTrees++;
+}
+
+// Árboles distribuidos sobre las laderas.
+
+let placedSlopeTrees=0;
+let attemptsSlope=0;
+
+while(placedSlopeTrees<28 && attemptsSlope<250){
+
+attemptsSlope++;
+
+const a=Math.random()*Math.PI*2;
+const r=13.4+Math.random()*3.8;
+
+const x=Math.cos(a)*r;
+const z=Math.sin(a)*r*.90;
+
+if(!isEretzPositionFree(x,z))continue;
+
+const y=eretzSlopeHeight(r);
+
+createTree(
+layers.eretz,
+x,
+y+.12,
+z,
+.45+Math.random()*.45,
+Math.random()<.12?1:0
+);
+
+placedSlopeTrees++;
+}
+
+// Arbustos y vegetación baja en la cima.
+
+for(let i=0;i<45;i++){
+
+const a=Math.random()*Math.PI*2;
+const r=3+Math.random()*10;
+
+const x=Math.cos(a)*r;
+const z=Math.sin(a)*r*.90;
+
+if(!isEretzPositionFree(x,z))continue;
+
+createTree(
+layers.eretz,
+x,
+eretzTop+.12,
+z,
+.18+Math.random()*.22,
+0
+);
+}
+
+// Arbustos pequeños en las pendientes.
+
+for(let i=0;i<55;i++){
+
+const a=Math.random()*Math.PI*2;
+const r=13.3+Math.random()*3.8;
+
+const x=Math.cos(a)*r;
+const z=Math.sin(a)*r*.90;
+
+if(!isEretzPositionFree(x,z))continue;
+
+const y=eretzSlopeHeight(r);
+
+createTree(
+layers.eretz,
+x,
+y+.10,
+z,
+.16+Math.random()*.20,
+0
+);
+}
+
+// ============================================================
+// RÍOS Y CASCADAS
+// ============================================================
+
+const waterMaterial=new THREE.MeshPhysicalMaterial({
+color:0x51cde0,
+roughness:.12,
+metalness:.1,
+transparent:true,
+opacity:.75,
+clearcoat:1
+});
+
+function waterChannel(points,radius=.2){
+const curve=new THREE.CatmullRomCurve3(
+points.map(p=>new THREE.Vector3(...p))
+);
+
+return add(
+new THREE.Mesh(
+new THREE.TubeGeometry(curve,100,radius,12,false),
+waterMaterial
+),
+waterGroup
+);
+}
+
+waterChannel([
+[-6,20,-2],[-8,17,-5],[-7,12,-7],[-6,7,-9]
+]);
+
+waterChannel([
+[6,20,2],[8,17,-3],[7,12,-6],[6,7,-9]
+]);
+
+function waterfall(x,z,top,bottom){
+
+const stream=new THREE.Mesh(
+new THREE.CylinderGeometry(.15,.3,top-bottom,16,1,true),
+new THREE.MeshBasicMaterial({
+color:0x75dff1,
+transparent:true,
+opacity:.4,
+side:THREE.DoubleSide
+})
+);
+
+stream.position.set(x,(top+bottom)/2,z);
+add(stream,waterGroup);
+
+for(let i=0;i<55;i++){
+const drop=new THREE.Mesh(
+new THREE.SphereGeometry(.045+Math.random()*.05,8,8),
+new THREE.MeshBasicMaterial({
+color:0xb0f4ff,
+transparent:true,
+opacity:.8
+})
+);
+
+drop.position.set(
+x+(Math.random()-.5)*.5,
+bottom+Math.random()*(top-bottom),
+z+(Math.random()-.5)*.5
+);
+
+add(drop,waterGroup);
+
+animated.push({
+obj:drop,
+type:"water",
+speed:1+Math.random()*2,
+offset:Math.random()*20,
+top,bottom
+});
+}
+}
+
+waterfall(-6.8,-9,edenTop,adamahTop);
+waterfall(6.8,-9,edenTop,adamahTop);
+waterfall(-9,-11,LEVELS.eretz,-28);
+
+// ============================================================
+// ANIMALES
+// ============================================================
+
+function createAnimal(parent,x,y,z,scale=1,color=0x9b8061,bird=false){
+
+const g=new THREE.Group();
+g.position.set(x,y,z);
+g.scale.setScalar(scale);
+parent.add(g);
+
+const body=add(new THREE.Mesh(
+new THREE.SphereGeometry(.5,20,14),
+M(color)
+),g);
+
+body.scale.set(1.2,.7,.7);
+
+if(bird){
+const wingMaterial=M(0xb6a07a);
+
+for(const side of [-1,1]){
+const wing=add(new THREE.Mesh(
+new THREE.SphereGeometry(.25,12,10),
+wingMaterial
+),g);
+
+wing.position.set(side*.3,.15,0);
+wing.scale.set(1.5,.18,.7);
+}
+
+const beak=add(new THREE.Mesh(
+new THREE.ConeGeometry(.09,.3,8),
+M(0xc89a54)
+),g);
+
+beak.rotation.z=-Math.PI/2;
+beak.position.x=.5;
+
+}else{
+const head=add(new THREE.Mesh(
+new THREE.SphereGeometry(.25,16,12),
+M(color)
+),g);
+
+head.position.set(.55,.3,0);
+
+for(const side of [-1,1]){
+cylinderBetween(
+new THREE.Vector3(side*.3,-.1,0),
+new THREE.Vector3(side*.35,-.5,0),
+.1,.07,M(0x574638),g
+);
+}
+}
+
+return g;
+}
+
+for(let i=0;i<8;i++){
+createAnimal(
+layers.eden,
+-5+i*1.4,
+edenTop+.65,
+3+Math.sin(i)*2,
+.5,0xc7ad82,i%3===0
+);
+}
+
+for(let i=0;i<9;i++){
+createAnimal(
+layers.adamah,
+-7+i*1.7,
+adamahTop+.45,
+4+Math.sin(i*1.4)*3,
+.6,0x92795d,i%4===0
+);
+}
+
+// ============================================================
+// HUMANOS
+// ============================================================
+
+function human(name,parent,position,robe,skin=0xc99870,scale=1,mark=false){
+
+const g=new THREE.Group();
+g.position.set(...position);
+g.scale.setScalar(scale);
+g.userData.name=name;
+
+const clothing=M(robe,.9);
+const skinMaterial=M(skin,.75);
+const hairMaterial=M(0x3a2921);
+
+const torso=add(new THREE.Mesh(
+new THREE.CapsuleGeometry(.32,.8,5,12),
+clothing
+),g);
+
+torso.position.y=1.15;
+torso.scale.set(.9,1,.65);
+
+const head=add(new THREE.Mesh(
+new THREE.SphereGeometry(.28,20,16),
+skinMaterial
+),g);
+
+head.position.y=2.05;
+
+const hair=add(new THREE.Mesh(
+new THREE.SphereGeometry(.3,16,12,0,Math.PI*2,0,Math.PI*.55),
+hairMaterial
+),g);
+
+hair.position.y=2.12;
+
+for(const side of [-1,1]){
+cylinderBetween(
+new THREE.Vector3(side*.28,1.5,0),
+new THREE.Vector3(side*.48,.85,0),
+.13,.09,clothing,g
+);
+
+cylinderBetween(
+new THREE.Vector3(side*.15,.8,0),
+new THREE.Vector3(side*.2,.1,0),
+.15,.11,M(0x625044),g
+);
+}
+
+if(mark){
+const halo=new THREE.Mesh(
+new THREE.TorusGeometry(.4,.06,12,48),
+new THREE.MeshBasicMaterial({color:0xffb72c})
+);
+
+halo.position.y=2.65;
+halo.rotation.x=Math.PI/2;
+add(halo,g);
+
+const light=new THREE.PointLight(0xffa12c,8,5);
+light.position.y=2.6;
+g.add(light);
+g.userData.mark=halo;
+}
+
+parent.add(g);
+characters[name]=g;
+pickables.push(g);
+return g;
+}
+
+human("Adán",layers.eden,[-1,edenTop+.15,4],0x987553,0xc58d68,.9);
+human("Eva",layers.eden,[1,edenTop+.15,4],0x9d4e42,0xd3a078,.9);
+
+human("Caín",layers.adamah,[-2,adamahTop+.15,2],0x66513c,0xb9845e,.95,true);
+human("Abel",layers.adamah,[2,adamahTop+.15,2],0x718b72,0xc99570,.95);
+
+human("Set",layers.adamah,[4.5,adamahTop+.15,-3],0x657b9a,0xc99570,.82);
+human("Azura",layers.adamah,[6,adamahTop+.15,-3],0x9c789b,0xd2a07b,.82);
+
+human("Awan",layers.eretz,[4,eretzTop+.15,2],0x986b49,0xc58f6a,.85);
+
+// ============================================================
+// NEFILIM / TITANES
+// ============================================================
+
+const titans=[];
+
+function createTitan(x,z,scale=1){
+
+const g=new THREE.Group();
+g.position.set(x,eretzTop+.15,z);
+g.scale.setScalar(scale);
+
+const stone=M(0x34383d,1,.1);
+const stone2=M(0x59534b,.95);
+
+const torso=add(new THREE.Mesh(
+new THREE.CapsuleGeometry(.95,2.2,7,12),
+stone
+),g);
+
+torso.position.y=2.5;
+torso.scale.set(1.25,1,.8);
+
+const head=add(new THREE.Mesh(
+new THREE.DodecahedronGeometry(.75,1),
+stone2
+),g);
+
+head.position.y=4.25;
+
+for(const side of [-1,1]){
+cylinderBetween(
+new THREE.Vector3(side*1,3.3,0),
+new THREE.Vector3(side*1.5,1.8,0),
+.42,.3,stone,g
+);
+
+cylinderBetween(
+new THREE.Vector3(side*.5,1.5,0),
+new THREE.Vector3(side*.5,.2,0),
+.42,.28,stone,g
+);
+
+const eye=add(new THREE.Mesh(
+new THREE.SphereGeometry(.09,10,8),
+new THREE.MeshBasicMaterial({color:0xff623b})
+),g);
+
+eye.position.set(side*.25,4.3,.62);
+}
+
+for(let i=0;i<6;i++){
+const spike=add(new THREE.Mesh(
+new THREE.ConeGeometry(.2,.8,8),
+stone2
+),g);
+
+spike.position.set((Math.random()-.5)*1.4,4.6,-.5);
+}
+
+layers.eretz.add(g);
+titans.push(g);
+pickables.push(g);
+}
+
+createTitan(-8,-4,1.1);
+createTitan(8,-5,1.2);
+createTitan(-4,7,1.05);
+createTitan(5,7,1.1);
+
+// ============================================================
+// REFAIM / ESPECTROS EN SHEOL
+// ============================================================
+
+const ghosts=[];
+
+for(let i=0;i<4;i++){
+
+const g=new THREE.Group();
+g.position.set(
+Math.cos(i*Math.PI/2)*8,
+-28,
+Math.sin(i*Math.PI/2)*8
+);
+
+const ghostMaterial=new THREE.MeshPhysicalMaterial({
+color:0xb4f6ff,
+transparent:true,
+opacity:.4,
+roughness:.2,
+emissive:0x2b9eaf,
+emissiveIntensity:.6,
+depthWrite:false
+});
+
+const torso=add(new THREE.Mesh(
+new THREE.CapsuleGeometry(.65,1.2,6,12),
+ghostMaterial
+),g);
+
+torso.position.y=.1;
+torso.scale.set(.8,1.1,.55);
+
+const head=add(new THREE.Mesh(
+new THREE.SphereGeometry(.42,16,12),
+ghostMaterial
+),g);
+
+head.position.y=1.35;
+
+for(const side of [-1,1]){
+const arm=add(new THREE.Mesh(
+new THREE.CapsuleGeometry(.15,.8,5,8),
+ghostMaterial
+),g);
+
+arm.position.set(side*.65,.4,0);
+arm.rotation.z=side*.4;
+}
+
+g.add(new THREE.PointLight(0x77e8ff,3,6));
+layers.sheol.add(g);
+ghosts.push(g);
+}
+
+// ============================================================
+// RAKI'A OVOIDE
+// ============================================================
+
+const shellGeometry=new THREE.SphereGeometry(1,128,96);
+
+const shellMaterial=new THREE.MeshPhysicalMaterial({
+color:0x8db5ce,
+metalness:.18,
+roughness:.13,
+transparent:true,
+opacity:.12,
+transmission:.5,
+thickness:1.2,
+ior:1.2,
+side:THREE.DoubleSide,
+clearcoat:1,
+depthWrite:false
+});
+
+const shell=new THREE.Mesh(shellGeometry,shellMaterial);
+shell.scale.set(21,38,18);
+shell.position.y=-2;
+world.add(shell);
+
+const wire=new THREE.Mesh(
+new THREE.SphereGeometry(1,48,32),
+new THREE.MeshBasicMaterial({
+color:0x7cc8df,
+wireframe:true,
+transparent:true,
+opacity:.035
+})
+);
+
+wire.scale.copy(shell.scale);
+wire.position.copy(shell.position);
+world.add(wire);
+
+// ============================================================
+// ETIQUETAS
+// ============================================================
+
+function makeLabel(text,position,color="#e9d4a2"){
+
+const canvas=document.createElement("canvas");
+canvas.width=512;
+canvas.height=96;
+
+const ctx=canvas.getContext("2d");
+ctx.font="600 32px Georgia";
+ctx.fillStyle=color;
+ctx.textAlign="center";
+ctx.fillText(text,256,58);
+
+const texture=new THREE.CanvasTexture(canvas);
+
+const sprite=new THREE.Sprite(
+new THREE.SpriteMaterial({
+map:texture,
+transparent:true,
+depthWrite:false
+})
+);
+
+sprite.position.copy(new THREE.Vector3(...position));
+sprite.scale.set(10,1.8,1);
+labelGroup.add(sprite);
+return sprite;
+}
+
+makeLabel("GAN EDÉN · JARDÍN SUPERIOR",[0,24,8],"#f4d79b");
+makeLabel("ADAMÁ · TIERRA FÉRTIL",[0,9,12],"#e8bd88");
+makeLabel("ÉRETS · SUPERFICIE TERRESTRE",[0,-10,16],"#e0c5a0");
+makeLabel("SHEOL · ABISMO INFERIOR",[0,-32,9],"#c5a6e7");
+
+// ============================================================
+// CÁMARA Y CONTROLES
+// ============================================================
+
+const views={
+global:{position:[40,30,55],target:[0,-4,0]},
+eden:{position:[14,29,27],target:[0,19,0]},
+adamah:{position:[18,15,25],target:[0,6,0]},
+eretz:{position:[22,-5,28],target:[0,-13,0]},
+sheol:{position:[18,-20,26],target:[0,-29,0]}
+};
+
+function focus(name){
+const v=views[name];
+
+gsap.to(camera.position,{
+x:v.position[0],y:v.position[1],z:v.position[2],
+duration:2,ease:"power2.inOut"
+});
+
+gsap.to(controls.target,{
+x:v.target[0],y:v.target[1],z:v.target[2],
+duration:2,ease:"power2.inOut"
+});
+}
+
+document.querySelectorAll("[data-view]").forEach(button=>{
+button.addEventListener("click",()=>focus(button.dataset.view));
+});
+
+document.getElementById("global").onclick=()=>focus("global");
+
+// ============================================================
+// CORTE TRANSVERSAL
+// ============================================================
+
+let cutActive=false;
+
+document.getElementById("cut").onclick=()=>{
+cutActive=!cutActive;
+
+shell.visible=!cutActive;
+wire.visible=!cutActive;
+
+if(cutActive){
+const halfShell=new THREE.Mesh(
+new THREE.SphereGeometry(1,128,96,0,Math.PI),
+new THREE.MeshPhysicalMaterial({
+color:0x8db5ce,
+transparent:true,
+opacity:.1,
+transmission:.4,
+roughness:.15,
+side:THREE.DoubleSide,
+depthWrite:false
+})
+);
+
+halfShell.scale.copy(shell.scale);
+halfShell.position.copy(shell.position);
+halfShell.rotation.y=Math.PI/2;
+halfShell.name="halfShell";
+
+world.add(halfShell);
+shell.userData.half=halfShell;
+document.getElementById("cut").textContent="Cerrar la bóveda";
+
+}else{
+if(shell.userData.half){
+world.remove(shell.userData.half);
+shell.userData.half.geometry.dispose();
+shell.userData.half.material.dispose();
+shell.userData.half=null;
+}
+
+shell.visible=true;
+wire.visible=true;
+document.getElementById("cut").textContent="Activar corte transversal";
+}
+};
+
+// ============================================================
+// SECUENCIAS NARRATIVAS
+// ============================================================
+
+let timeline=null;
+let isPaused=false;
+
+function stopTimeline(){
+if(timeline){
+timeline.kill();
+timeline=null;
+}
+isPaused=false;
+}
+
+function moveCharacter(name,parent,worldPosition,duration=3){
+const character=characters[name];
+
+const local=parent.worldToLocal(
+new THREE.Vector3(...worldPosition)
+);
+
+timeline.to(character.position,{
+x:local.x,
+y:local.y,
+z:local.z,
+duration,
+ease:"power2.inOut"
+});
+}
+
+function startStory(type){
+
+stopTimeline();
+
+timeline=gsap.timeline({
+onComplete:()=>{
+document.getElementById("infoTitle").textContent="Secuencia completada";
+}
+});
+
+if(type==="germ"){
+
+focus("adamah");
+
+document.getElementById("infoTitle").textContent=
+"I · Germinación y elevación";
+
+document.getElementById("infoText").textContent=
+"La vegetación y la fauna emergen en la Adamá. La secuencia visualiza su elevación hacia el jardín superior.";
+
+timeline.fromTo(
+layers.adamah.scale,
+{x:.85,y:.85,z:.85},
+{x:1,y:1,z:1,duration:2,ease:"back.out(1.7)"}
+);
+
+timeline.to(edenLight,{
+intensity:280,
+duration:1.5,
+yoyo:true,
+repeat:2
+},1);
+
+const trees=layers.adamah.children.filter(
+object=>object.type==="Group"
+);
+
+trees.forEach((tree,i)=>{
+timeline.fromTo(
+tree.scale,
+{x:.01,y:.01,z:.01},
+{x:1,y:1,z:1,duration:1.2,ease:"back.out(2)"},
+.3+i*.05
+);
+});
+}
+
+if(type==="fall"){
+
+focus("eden");
+
+document.getElementById("infoTitle").textContent=
+"II · La desobediencia";
+
+document.getElementById("infoText").textContent=
+"Adán y Eva descienden desde Gan Edén hacia la Adamá.";
+
+moveCharacter("Adán",layers.adamah,[-1,adamahTop+.15,4],4);
+moveCharacter("Eva",layers.adamah,[1,adamahTop+.15,4],4);
+}
+
+if(type==="murder"){
+
+focus("adamah");
+
+document.getElementById("infoTitle").textContent=
+"III · Fratricidio y expulsión";
+
+document.getElementById("infoText").textContent=
+"Abel cae hacia el Sheol. Caín desciende a la Érets y su marca resplandece.";
+
+timeline.to(characters.Abel.rotation,{
+z:Math.PI/2,
+duration:1
+},.5);
+
+moveCharacter("Abel",layers.sheol,[0,-29,0],3);
+
+timeline.to(characters.Abel.scale,{
+x:.05,y:.05,z:.05,
+duration:2
+},2);
+
+moveCharacter("Caín",layers.eretz,[-5,eretzTop+.15,3],4);
+
+timeline.to(characters["Caín"].userData.mark.scale,{
+x:1.5,y:1.5,z:1.5,
+duration:.5,
+yoyo:true,
+repeat:6
+},2);
+}
+
+if(type==="settle"){
+
+focus("eretz");
+
+document.getElementById("infoTitle").textContent=
+"IV · Población de la Érets";
+
+document.getElementById("infoText").textContent=
+"Caín y Awan habitan la Érets. Set y Azura permanecen en los niveles superiores.";
+
+moveCharacter("Caín",layers.eretz,[-5,eretzTop+.15,3],3);
+moveCharacter("Awan",layers.eretz,[4,eretzTop+.15,2],3);
+
+timeline.to(characters["Caín"].userData.mark.scale,{
+x:1.5,y:1.5,z:1.5,
+duration:.4,
+yoyo:true,
+repeat:8
+},1);
+
+timeline.to(characters.Set.position,{
+y:adamahTop+.15,
+duration:2
+},3);
+
+timeline.to(characters.Azura.position,{
+y:adamahTop+.15,
+duration:2
+},3);
+}
+}
+
+document.querySelectorAll("[data-story]").forEach(button=>{
+button.addEventListener("click",()=>startStory(button.dataset.story));
+});
+
+document.getElementById("pause").onclick=()=>{
+if(!timeline)return;
+
+if(isPaused){
+timeline.resume();
+isPaused=false;
+}else{
+timeline.pause();
+isPaused=true;
+}
+};
+
+// ============================================================
+// VISIBILIDAD
+// ============================================================
+
+document.getElementById("water").onchange=e=>{
+waterGroup.visible=e.target.checked;
+};
+
+document.getElementById("labels").onchange=e=>{
+labelGroup.visible=e.target.checked;
+};
+
+// ============================================================
+// ESTRELLAS
+// ============================================================
+
+const starPositions=[];
+
+for(let i=0;i<1800;i++){
+const radius=45+Math.random()*60;
+const angle=Math.random()*Math.PI*2;
+
+starPositions.push(
+Math.cos(angle)*radius,
+(Math.random()-.5)*100,
+Math.sin(angle)*radius
+);
+}
+
+const starGeometry=new THREE.BufferGeometry();
+starGeometry.setAttribute(
+"position",
+new THREE.Float32BufferAttribute(starPositions,3)
+);
+
+const stars=new THREE.Points(
+starGeometry,
+new THREE.PointsMaterial({
+color:0xc5d9f7,
+size:.15,
+transparent:true,
+opacity:.8
+})
+);
+
+scene.add(stars);
+
+document.getElementById("atmo").onchange=e=>{
+stars.visible=e.target.checked;
+};
+
+// ============================================================
+// INSPECCIÓN DE PERSONAJES
+// ============================================================
+
+const raycaster=new THREE.Raycaster();
+const pointer=new THREE.Vector2();
+
+renderer.domElement.addEventListener("click",event=>{
+
+pointer.x=event.clientX/innerWidth*2-1;
+pointer.y=-(event.clientY/innerHeight)*2+1;
+
+raycaster.setFromCamera(pointer,camera);
+
+const hits=raycaster.intersectObjects(pickables,true);
+if(!hits.length)return;
+
+let object=hits[0].object;
+
+while(object&&!object.userData.name&&object.parent){
+object=object.parent;
+}
+
+if(object&&object.userData.name){
+document.getElementById("infoTitle").textContent=
+object.userData.name;
+
+document.getElementById("infoText").textContent=
+"Figura procedimental de la reconstrucción cosmológica. Puedes orbitar alrededor del personaje y explorar su ubicación dentro del estrato.";
+}
+});
+
+// ============================================================
+// ANIMACIÓN
+// ============================================================
+
+const clock=new THREE.Clock();
+
+function animate(){
+
+requestAnimationFrame(animate);
+const t=clock.getElapsedTime();
+
+controls.update();
+
+// Movimiento de los Refaim.
+
+ghosts.forEach((ghost,i)=>{
+ghost.position.y=-28+Math.sin(t*1.1+i)*.6;
+ghost.rotation.y=Math.sin(t*.3+i)*.15;
+});
+
+// Movimiento de partículas acuáticas.
+
+animated.forEach(item=>{
+if(item.type==="water"){
+item.obj.position.y=
+item.bottom+
+((t*item.speed+item.offset)%(item.top-item.bottom));
+
+item.obj.visible=item.obj.position.y<item.top;
+}
+});
+
+// Pulso de luz del jardín.
+
+edenLight.intensity=180+Math.sin(t*1.5)*25;
+
+// Movimiento atmosférico.
+
+stars.rotation.y=t*.002;
+
+renderer.render(scene,camera);
+}
+
+animate();
+
+// ============================================================
+// AJUSTE RESPONSIVE
+// ============================================================
+
+window.addEventListener("resize",()=>{
+camera.aspect=innerWidth/innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(innerWidth,innerHeight);
+});
+
+</script>
+</body>
+</html>
